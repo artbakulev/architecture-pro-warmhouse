@@ -1,0 +1,56 @@
+@startuml Теплый Дом - Сервис удаленного управления устройствами - C4 Component
+!include <C4/C4_Component>
+
+title "Теплый Дом - Сервис удаленного управления устройствами - C4 Component"
+
+AddRelTag("async", $lineStyle=DashedLine(), $legendText="асинхронное взаимодействие")
+
+Container(mqtt_broker, "MQTT-брокер", "EMQX", "Управляет MQTT-сессиями датчиков и их аутентификацией")
+ContainerDb(device_remote_control_db, "БД команд", "PostgreSQL", "Хранит команды для датчиков и их статус")
+Container(smarthome_api, "API управления устройствами и регистрации пользователей", "Python", "Единый шлюз работы с сервисом")
+
+Container_Boundary(remote_device_control_service, "Сервис удаленного управления устройствами") {
+    Boundary(protected_api, "Доступные только под межсервисной авторизацией методы") {
+        Component(send_command_controller, "Компонент отправки команды", "chi Handler", "Принимает команду на выполнение")
+        Component(status_command_controller, "Компонент получения статуса команды", "chi Handler", "Отдает статус выполнения команды и результат")
+    }
+
+    Component(auth_middleware, "Middleware авторизации", "chi Middleware", "Проверяет basic-auth заголовок")
+    Component(config, "Конфигурация приложения", "go struct + yaml", "Хранит секреты, строки подключения к БД и другие настройки")
+
+    Component(mqtt_accessor, "Клиент MQTT-брокера", "paho.mqtt.golang", "Публикует команды и подписывается на подтверждения от датчиков")
+    Component(command_result_handler, "Обработчик подтверждений", "go goroutine", "Разбирает подтверждения от датчиков и обновляет статус команды")
+    Component(expired_commands_sweeper, "Добивщик просроченных команд", "go ticker", "Переводит команды, не подтвержденные за отведенное время, в статус failed")
+
+    Component(device_remote_control_db_accessor, "Компонент доступа к реляционной БД", "pgx", "Работает с БД")
+
+    Rel(auth_middleware, protected_api, "Пропускает запросы только с валидными межсервисными учетными данными")
+    Rel(auth_middleware, config, "Получает учетные данные для проверки заголовка")
+
+    ' тут конечно нужен outbox, но слишком сложно уже получается
+    Rel(send_command_controller, device_remote_control_db_accessor, "Создает команду в статусе pending")
+    Rel(send_command_controller, mqtt_accessor, "Публикует команду датчику")
+
+    Rel(status_command_controller, device_remote_control_db_accessor, "Читает статус и результат команды")
+
+    Rel(mqtt_accessor, command_result_handler, "Передает подтверждение от датчика")
+    Rel(command_result_handler, device_remote_control_db_accessor, "Обновляет статус команды на acked или failed")
+
+    Rel(expired_commands_sweeper, device_remote_control_db_accessor, "Находит просроченные команды и переводит их в failed")
+
+    Rel(mqtt_accessor, config, "Получает адрес и учетные данные MQTT-брокера")
+    Rel(device_remote_control_db_accessor, config, "Получает адрес и учетные данные БД")
+    Rel(expired_commands_sweeper, config, "Получает срок жизни команды и период запуска")
+}
+
+Rel(smarthome_api, send_command_controller, "Отправляет команду на выполнение", "REST API")
+' можно перенести в асинхронное взаимодействие через кафку при необходимости
+Rel(smarthome_api, status_command_controller, "Опрашивает статус выполнения команды", "REST API")
+
+Rel(device_remote_control_db_accessor, device_remote_control_db, "Отправляет запросы", "TCP")
+
+Rel(mqtt_accessor, mqtt_broker, "Публикует команду в топик датчика", "MQTT")
+Rel(mqtt_broker, mqtt_accessor, "Доставляет подтверждение выполнения", "MQTT", $tags="async")
+
+SHOW_LEGEND()
+@enduml

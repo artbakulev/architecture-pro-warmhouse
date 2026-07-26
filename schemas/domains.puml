@@ -1,0 +1,23 @@
+@startuml Теплый Дом - доменные области
+!include <C4/C4_Component>
+
+title Теплый Дом - доменные области
+
+Boundary(devices, "Управление устройствами", "Domain") {
+    Container(sensors_management, "Управление датчиками", "Subdomain") {
+        Component(sensor_registration, "Регистрация датчиков", "Context")
+        Component(sensor_remote_control, "Удаленное управление датчиками", "Context")
+    }
+    Container(measurements_management, "Управление показаниями", "Subdomain") {
+        Component(measurements_receiver, "Прием показаний", "Context")
+        Component(measurements_view, "Отображение показаний", "Context")
+    }
+}
+
+Boundary(users, "Управление пользователями", "Domain") {
+    Container(auth, "Регистрация и авторизация пользователей", "Subdomain")
+}
+
+SHOW_LEGEND()
+HIDE_STEREOTYPE()
+@enduml

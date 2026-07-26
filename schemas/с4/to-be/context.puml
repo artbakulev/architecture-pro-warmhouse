@@ -1,0 +1,23 @@
+@startuml Теплый Дом to-be - C4 Context
+!include <C4/C4_Context>
+
+title Теплый Дом to-be - C4 Context
+
+Person(user, "Пользователь", "Самостоятельно подключает датчики, управляет ими и смотрит их показания")
+
+System(smarthome, "Система управления устройствами", "Регистрирует устройства пользователей, принимает их показания и передает им команды")
+
+System_Ext(sensor, "Датчик", "Передает показания и выполняет команды")
+System_Ext(email_provider, "Сервис отправки email", "Отсылает email-уведомление")
+
+Rel(user, smarthome, "Регистрирует датчики, просматривает их показания и отправляет им команды", "HTTPS")
+Rel(user, sensor, "Устанавливает и подключает датчик самостоятельно")
+
+Rel(sensor, smarthome, "Передает показания", "MQTT")
+Rel(smarthome, sensor, "Передает команду для выполнения", "MQTT")
+
+Rel(smarthome, email_provider, "Запрашивает отправку письма", "SMTP / REST API")
+Rel(email_provider, user, "Доставляет письмо", "SMTP")
+
+SHOW_LEGEND()
+@enduml

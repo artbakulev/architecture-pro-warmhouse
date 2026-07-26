@@ -1,0 +1,68 @@
+@startuml Теплый Дом - C4 Container
+!include<C4/C4_Container>
+
+title "Теплый дом - C4 Container"
+
+AddRelTag("async", $lineStyle=DashedLine(), $legendText="асинхронное взаимодействие")
+
+Person(user, "Пользователь", "Регистрирует и управляет своими датчиками")
+
+System_Ext(sensor, "Датчик", "Передает свои показания и выполняет команды")
+System_Ext(email_provider, "Сервис отправки email", "Отсылает email-уведомление")
+
+System_Boundary(smarthome, "Система управления устройствами") {
+    ' Пользовательский сервис 
+    Container(smarthome_ui, "Веб-сервис управления устройствами", "React", "UI для регистрации/авторизации и управления своими устройствами", $sprite="&browser")
+    Container(smarthome_api, "API управления устройствами и регистрации пользователей", "Python", "Единый шлюз работы с сервисом")
+    ContainerDb(relation_db, "БД пользователей и датчиков", "PostgreSQL", "Хранит данные о датчиках и пользователях")
+
+    Rel(smarthome_ui, smarthome_api, "Обращается с запросами", "REST API")
+    Rel(smarthome_api, relation_db, "Управляет датчиками и пользователями", "TCP")
+    
+
+    ' Обработка показаний 
+    Container(mqtt_broker, "MQTT-брокер", "EMQX", "Управляет MQTT-сессиями датчиков и их аутентификацией")
+    Container(measurements_worker, "Сервис обработки показаний датчиков", "Go", "Записывает показания в ClickHouse пакетами")
+    ContainerQueue(measurements_queue, "Очередь показаний датчиков", "Kafka")
+    ContainerDb(timeseries_db, "БД временных рядов", "Clickhouse", "Хранит переданные показания датчиков")
+    Container(sensors_gc, "GC данных сенсоров", "Go CronJob", "Удаляет осиротевшие данные")
+    Rel(smarthome_api, timeseries_db, "Считывает переданные показания датчиков", "TCP")
+    Rel(sensors_gc, relation_db, "Читает удаленные (soft-delete) датчики и забирает их на очистку", "TCP")
+    Rel(sensors_gc, timeseries_db, "Удаляет осиротевшие показания по sensor_id", "TCP")
+    
+
+    Rel(mqtt_broker, relation_db, "Проверяет учётные данные датчика при подключении", "TCP")
+    Rel(mqtt_broker, measurements_queue, "Публикует принятые показания", "Kafka protocol", $tags="async")
+    Rel(measurements_queue, measurements_worker, "Доставляет показания", "Kafka protocol", $tags="async")
+    Rel(measurements_worker, timeseries_db, "Записывает показания пакетами", "TCP")
+    
+
+    ' Обработка команд
+    Container(remote_device_control_service, "Сервис удаленного управления устройствами", "Go", "Отправляет команды датчику")
+    ContainerDb(device_remote_control_db, "БД команд", "PostgreSQL", "Хранит команды для датчиков и их статус")
+
+    Rel(smarthome_api, remote_device_control_service, "Передает команду от пользователя или запрашивает статус выполнения команды", "REST API")
+    Rel(remote_device_control_service, device_remote_control_db, "Записывает принятые команды и результаты их выполнения", "TCP")
+    Rel(remote_device_control_service, mqtt_broker, "Передает команду для выполнения", "MQTT")
+    Rel(smarthome_api, mqtt_broker, "Разрывает соединение при удалении датчика", "HTTP Management API")
+    Rel(mqtt_broker, remote_device_control_service, "Возвращает результат выполнения команды", "MQTT", $tags="async")
+
+    ' Обработка сценариев
+    Container(scenarios_engine_service, "Сервис выполнения пользовательских сценариев", "Python", "Реагирует на событие и выполняет сценарии")
+    ContainerDb(scenarios_engine_service_db, "БД пользовательских сценариев", "PostgreSQL", "Хранит пользовательские сценарии и историю их выполнения")
+    Rel(measurements_queue, scenarios_engine_service, "Доставляет показания", "Kafka protocol", $tags="async")
+    Rel(scenarios_engine_service, scenarios_engine_service_db, "Хранит сценарии и историю их срабатываний", "TCP")
+    Rel(scenarios_engine_service, remote_device_control_service, "Отправляет команды по сработавшим сценариям", "REST API")
+    Rel(smarthome_api, scenarios_engine_service, "Управляет сценариями", "REST API")
+}
+
+
+' Внешние интеграции
+Rel(user, smarthome_ui, "Регистрирует новый датчик, управляет им и смотрит его показания", "HTTPS")
+Rel(sensor, mqtt_broker, "Устанавливает соединение и передает показания", "MQTT")
+
+Rel(mqtt_broker, sensor, "Передает команду для выполнения", "MQTT")
+Rel(smarthome_api, email_provider, "Отправляет письма при регистрации и сбросе пароля", "SMTP / REST API")
+
+SHOW_LEGEND()
+@enduml

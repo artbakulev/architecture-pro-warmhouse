@@ -1,0 +1,27 @@
+@startuml Теплый Дом - GC данных сенсоров - C4 Component
+!include <C4/C4_Component>
+
+title "Теплый Дом - GC данных сенсоров - C4 Component"
+
+ContainerDb(relation_db, "БД пользователей и датчиков", "PostgreSQL", "Хранит данные о датчиках и пользователях")
+ContainerDb(timeseries_db, "БД временных рядов", "Clickhouse", "Хранит переданные показания датчиков")
+
+Container_Boundary(sensors_gc, "GC данных сенсоров") {
+    Component(gc_usecase, "Сценарий очистки данных", "go function", "Последовательно выполняет удаление")
+    Component(pg_accessor, "Компонент доступа к реляционной БД", "pgx", "Берет датчик в работу и отмечает его очищенным")
+    Component(ch_accessor, "Компонент доступа к колоночной БД", "clickhouse-go", "Удаляет показания по идентификатору датчика")
+    Component(config, "Конфигурация приложения", "go struct + yaml", "Хранит секреты, строки подключения к БД и другие настройки")
+
+    Rel(gc_usecase, pg_accessor, "Получает мягко удаленные датчики, отмечает очищенные")
+    Rel(gc_usecase, ch_accessor, "Удаляет показания по датчикам")
+
+    Rel(gc_usecase, config, "Читает размер пакета, срок аренды и ограничение скорости")
+    Rel(pg_accessor, config, "Читает параметры подключения")
+    Rel(ch_accessor, config, "Читает параметры подключения")
+}
+
+Rel(pg_accessor, relation_db, "Берет мягко удаленный датчик в работу через lease, отмечает его очищенным после удаления показаний", "TCP")
+Rel(ch_accessor, timeseries_db, "Удаляет показания удаленных датчиков", "TCP")
+
+SHOW_LEGEND()
+@enduml

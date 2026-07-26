@@ -1,0 +1,31 @@
+@startuml Теплый Дом - Сервис обработки показаний датчиков - C4 Component
+!include <C4/C4_Component>
+
+title "Теплый Дом - Сервис обработки показаний датчиков - C4 Component"
+
+AddRelTag("async", $lineStyle=DashedLine(), $legendText="асинхронное взаимодействие")
+
+ContainerQueue(measurements_queue, "Очередь показаний датчиков", "Kafka")
+ContainerDb(timeseries_db, "БД временных рядов", "Clickhouse", "Хранит переданные показания датчиков")
+
+Container_Boundary(measurements_worker, "Сервис обработки показаний датчиков") {
+    Component(kafka_reader, "Компонент чтения из Kafka", "kafka-go", "Читает показания из топика и коммитит смещение")
+    Component(buffer, "Накопитель показаний в памяти", "go struct", "Копит записи до порога по числу или по таймауту, что наступит раньше")
+    Component(ch_writer, "Компонент записи в Clickhouse", "clickhouse-go", "Передает накопленный пакет показаний в ClickHouse")
+    Component(config, "Конфигурация приложения", "go struct + yaml", "Хранит секреты, строки подключения к БД и другие настройки")
+
+    Rel(kafka_reader, buffer, "Передает прочитанные показания")
+    Rel(buffer, ch_writer, "Инициирует запись накопленного пакета")
+    Rel(buffer, kafka_reader, "Подтверждает успешную вставку для коммита смещения")
+
+    Rel(kafka_reader, config, "Читает параметры подключения")
+    Rel(buffer, config, "Читает размер пакета и таймаут сброса")
+    Rel(ch_writer, config, "Читает параметры подключения")
+}
+
+Rel(measurements_queue, kafka_reader, "Доставляет показания", "Kafka protocol", $tags="async")
+Rel(kafka_reader, measurements_queue, "Коммитит смещение после успешной вставки", "Kafka protocol")
+Rel(ch_writer, timeseries_db, "Записывает показания пакетами", "TCP")
+
+SHOW_LEGEND()
+@enduml
