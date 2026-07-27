@@ -1,0 +1,68 @@
+@startuml Теплый Дом - Удаленное выполнение команды - C4 Dynamic
+!include <C4/C4_Sequence>
+
+title Теплый Дом - Удаленное выполнение команды - C4 Dynamic
+
+Person(user, "Пользователь", "Регистрирует и управляет своими датчиками")
+
+System_Boundary(smarthome, "Теплый Дом")
+    Container(smarthome_ui, "Веб-сервис управления устройствами", "React", $sprite="&browser")
+    Container(smarthome_api, "API управления устройствами и регистрации пользователей", "Python")
+    Container_Boundary(remote_device_control_service, "Сервис удаленного управления устройствами")
+        Component(auth_middleware, "Middleware авторизации", "chi Middleware", "Проверяет basic-auth заголовок")
+        Component(send_command_controller, "Компонент отправки команды", "chi Handler", "Принимает команду на выполнение")
+        Component(status_command_controller, "Компонент получения статуса команды", "chi Handler", "Отдает статус выполнения команды и результат")
+        Component(command_result_handler, "Обработчик подтверждений", "go goroutine", "Разбирает подтверждения от датчиков и обновляет статус команды")
+        Component(device_remote_control_db_accessor, "Компонент доступа к реляционной БД", "pgx", "Работает с БД")
+        Component(mqtt_accessor, "Клиент MQTT-брокера", "paho.mqtt.golang", "Публикует команды и подписывается на подтверждения от датчиков")
+    Boundary_End()
+    ContainerDb(device_remote_control_db, "БД команд", "PostgreSQL")
+    Container(mqtt_broker, "MQTT-брокер", "EMQX")
+Boundary_End()
+
+System_Ext(sensor, "Датчик")
+
+note over mqtt_accessor
+  Подписка на топик подтверждений
+  выполняется один раз при старте сервиса
+end note
+
+== Отправка команды ==
+
+Rel(user, smarthome_ui, "Вводит команду")
+Rel(smarthome_ui, smarthome_api, "Отправляет команду", "REST API")
+Rel(smarthome_api, auth_middleware, "Отправляет команду с basic auth", "REST API")
+Rel(auth_middleware, send_command_controller, "Пропускает авторизованный запрос")
+Rel(send_command_controller, device_remote_control_db_accessor, "Регистрирует команду в статусе pending")
+Rel(device_remote_control_db_accessor, device_remote_control_db, "Выполняет INSERT", "TCP")
+Rel(device_remote_control_db, device_remote_control_db_accessor, "Возвращает ID команды", "TCP")
+Rel(send_command_controller, mqtt_accessor, "Просит опубликовать команду")
+Rel(mqtt_accessor, mqtt_broker, "Публикует команду в топик датчика", "MQTT")
+Rel(send_command_controller, smarthome_api, "Возвращает ID команды")
+Rel(smarthome_api, smarthome_ui, "Сообщает, что команда принята к исполнению", "REST API")
+
+== Выполнение на устройстве ==
+
+Rel(mqtt_broker, sensor, "Доставляет команду", "MQTT")
+Rel(sensor, mqtt_broker, "Публикует подтверждение выполнения", "MQTT")
+Rel(mqtt_broker, mqtt_accessor, "Доставляет подтверждение", "MQTT")
+Rel(mqtt_accessor, command_result_handler, "Передает подтверждение от датчика")
+Rel(command_result_handler, device_remote_control_db_accessor, "Обновляет статус команды на acked")
+Rel(device_remote_control_db_accessor, device_remote_control_db, "Выполняет UPDATE", "TCP")
+
+== Опрос статуса ==
+
+loop пока команда в статусе pending
+    Rel(smarthome_ui, smarthome_api, "Запрашивает статус выполнения команды", "REST API")
+    Rel(smarthome_api, auth_middleware, "Запрашивает статус команды с basic auth", "REST API")
+    Rel(auth_middleware, status_command_controller, "Пропускает авторизованный запрос")
+    Rel(status_command_controller, device_remote_control_db_accessor, "Запрашивает статус команды")
+    Rel(device_remote_control_db_accessor, device_remote_control_db, "Выполняет SELECT", "TCP")
+    Rel(device_remote_control_db, device_remote_control_db_accessor, "Возвращает данные о команде", "TCP")
+    Rel(status_command_controller, smarthome_api, "Возвращает статус команды")
+    Rel(smarthome_api, smarthome_ui, "Отдает статус выполнения команды", "REST API")
+end
+
+Rel(smarthome_ui, user, "Отображает результат выполнения команды")
+
+@enduml
