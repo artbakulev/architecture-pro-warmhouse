@@ -1,0 +1,259 @@
+@startuml Теплый Дом - ERD
+title Теплый Дом - ERD
+
+hide circle
+hide empty methods
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+package "БД пользователей, датчиков и каталога — PostgreSQL" as db_catalog {
+
+    enum "sensor_type" as SensorType {
+        TEMPERATURE
+        HUMIDITY
+        CO2
+        MOTION
+    }
+
+    entity "app_user" as User {
+        * id: bigint <<PK>>
+        --
+        * email: varchar(320) <<UNIQ>>
+        * first_name: varchar(100)
+        * last_name: varchar(100)
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "user_session" as UserSession {
+        * id: uuid <<PK>>
+        --
+        * user_id: bigint <<FK>>
+        * expires_at: timestamptz
+        revoked_at: timestamptz
+        * created_at: timestamptz
+    }
+
+    entity "sensor_manufacturer" as SensorManufacturer {
+        * id: bigint <<PK>>
+        --
+        * name: varchar(100)
+        * logo_url: varchar(2048)
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "sensor_model" as SensorModel {
+        * id: bigint <<PK>>
+        --
+        * manufacturer_id: bigint <<FK>>
+        * type: sensor_type <<enum>>
+        * name: varchar(100)
+        * code: varchar(64) <<UNIQ>>
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "command_template" as CommandTemplate {
+        * id: bigint <<PK>>
+        --
+        * model_id: bigint <<FK>>
+        * name: varchar(100)
+        * code: varchar(64)
+        * description: varchar(500)
+        * spec: jsonb
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "sensor" as Sensor {
+        * id: bigint <<PK>>
+        --
+        * user_id: bigint <<FK>>
+        * model_id: bigint <<FK>>
+        * token: varchar(128) <<UNIQ>>
+        * verbose_name: varchar(100)
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "place" as Place {
+        * id: bigint <<PK>>
+        --
+        * user_id: bigint <<FK>>
+        * name: varchar(100)
+        coords: geography(Point,4326)
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "room" as Room {
+        * id: bigint <<PK>>
+        --
+        * place_id: bigint <<FK>>
+        * name: varchar(100)
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "sensor_placement" as SensorPlacement {
+        * id: bigint <<PK>>
+        --
+        * sensor_id: bigint <<FK>>
+        * room_id: bigint <<FK>>
+        * created_at: timestamptz
+        deleted_at: timestamptz
+    }
+}
+
+package "БД команд — PostgreSQL" as db_commands {
+
+    enum "command_status" as CommandStatus {
+        PROCESSING
+        DONE
+        CANCELLED
+        FAILED
+    }
+
+    entity "command" as Command {
+        * id: uuid <<PK>>
+        --
+        * sensor_id: bigint <<FK>>
+        * template_id: bigint <<FK>>
+        * status: command_status <<enum>>
+        payload: jsonb
+        error: text
+        * expires_at: timestamptz
+        finished_at: timestamptz
+        * created_at: timestamptz
+        * updated_at: timestamptz
+    }
+}
+
+package "БД пользовательских сценариев — PostgreSQL" as db_scenarios {
+
+    enum "scenario_step_template_type" as ScenarioStepTemplateType {
+        TRIGGER
+        EXECUTION
+        CONDITIONAL
+        LOOP
+    }
+
+    enum "scenario_execution_status" as ScenarioExecutionStatus {
+        PROCESSING
+        DONE
+        CANCELLED
+        FAILED
+    }
+
+    enum "scenario_step_execution_status" as ScenarioStepExecutionStatus {
+        NOT_STARTED
+        PROCESSING
+        DONE
+        CANCELLED
+        FAILED
+    }
+
+    entity "scenario" as Scenario {
+        * id: uuid <<PK>>
+        * version: integer <<PK>>
+        --
+        * user_id: bigint <<FK>>
+        * name: varchar(100)
+        * is_current: boolean
+        * created_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "scenario_step_template" as ScenarioStepTemplate {
+        * id: uuid <<PK>>
+        --
+        * name: varchar(100)
+        * type: scenario_step_template_type <<enum>>
+        * input_schema: jsonb
+        * created_at: timestamptz
+        * updated_at: timestamptz
+        deleted_at: timestamptz
+    }
+
+    entity "scenario_step" as ScenarioStep {
+        * id: bigint <<PK>>
+        --
+        * scenario_id: uuid <<FK>>
+        * scenario_version: integer <<FK>>
+        parent_step_id: bigint <<FK>> <<UNIQ>>
+        * template_id: uuid <<FK>>
+        * input: jsonb
+        * created_at: timestamptz
+    }
+
+    entity "scenario_execution" as ScenarioExecution {
+        * id: bigint <<PK>>
+        * scenario_id: uuid <<FK>>
+        * created_at: timestamptz
+        * status: scenario_execution_status
+        finished_at: timestamptz
+    }
+
+    entity "scenario_step_execution" as ScenarioStepExecution {
+        * id: bigint <<PK>>
+        --
+        * step_id: bigint <<FK>>
+        * status: scenario_step_execution_status <<enum>>
+        * created_at: timestamptz
+        finished_at: timestamptz
+        error: text
+    }
+}
+
+package "БД временных рядов - ClickHouse" as db_metrics {
+    entity "measurement" as Measurement {
+        * sensor_id: UInt64
+        * metric: LowCardinality(String)
+        * measured_at: DateTime64(3, 'UTC')
+        ---
+        * value: Float64
+        * received_at: DateTime64(3, 'UTC')
+        attributes: Map(LowCardinality(String), String)
+    }
+}
+
+' --- связи внутри БД пользователей, датчиков и каталога ---
+User ||--o{ UserSession : "открывает >"
+User ||--o{ Sensor : "владеет >"
+User ||--o{ Place : "владеет >"
+
+SensorManufacturer ||--o{ SensorModel : "выпускает >"
+SensorModel ||--o{ Sensor : "воплощается в >"
+SensorModel ||--o{ CommandTemplate : "поддерживает >"
+
+Place ||--o{ Room : "включает >"
+Sensor ||--o{ SensorPlacement : "размещается >"
+Room ||--o{ SensorPlacement : "вмещает >"
+
+' --- связи внутри БД сценариев ---
+Scenario ||--|{ ScenarioStep : "состоит из >"
+ScenarioStepTemplate ||--o{ ScenarioStep : "типизирует >"
+ScenarioStep ||--o{ ScenarioStepExecution : "выполняется как >"
+ScenarioStep ||--o| ScenarioStep : "предшествует >"
+
+Sensor ||..o{ Command : "адресат >"
+CommandTemplate ||..o{ Command : "описывает >"
+User ||..o{ Scenario : "создает >"
+
+Sensor ||--o{ Measurement : "публикует >"
+
+SensorModel::type ..> SensorType
+Command::status ..> CommandStatus
+ScenarioStepTemplate::type ..> ScenarioStepTemplateType
+ScenarioStepExecution::status ..> ScenarioStepExecutionStatus
+ScenarioExecution::status ..> ScenarioExecutionStatus
+
+@enduml
