@@ -15,12 +15,18 @@ package "БД пользователей, датчиков и каталога �
         MOTION
     }
 
+    enum "user_code_purpose" as UserCodePurpose {
+        REGISTRATION
+        PASSWORD_RECOVERY
+    }
+
     entity "app_user" as User {
         * id: bigint <<PK>>
         --
         * email: varchar(320) <<UNIQ>>
         * first_name: varchar(100)
         * last_name: varchar(100)
+        * password_hash: varchar(100)
         * created_at: timestamptz
         * updated_at: timestamptz
         deleted_at: timestamptz
@@ -30,8 +36,19 @@ package "БД пользователей, датчиков и каталога �
         * id: uuid <<PK>>
         --
         * user_id: bigint <<FK>>
+        * refresh_token_hash: varchar(100)
         * expires_at: timestamptz
         revoked_at: timestamptz
+        * created_at: timestamptz
+    }
+
+    entity "user_code" as UserCode {
+        * id: uuid <<PK>>
+        --
+        * user_id: bigint <<FK>>
+        * purpose: UserCodePurpose
+        * code: integer
+        * expires_at: timestamptz
         * created_at: timestamptz
     }
 
@@ -75,7 +92,7 @@ package "БД пользователей, датчиков и каталога �
         --
         * user_id: bigint <<FK>>
         * model_id: bigint <<FK>>
-        * token: varchar(128) <<UNIQ>>
+        * token_hash: varchar(128)
         * verbose_name: varchar(100)
         * created_at: timestamptz
         * updated_at: timestamptz
@@ -116,6 +133,7 @@ package "БД пользователей, датчиков и каталога �
 package "БД команд — PostgreSQL" as db_commands {
 
     enum "command_status" as CommandStatus {
+        PENDING
         PROCESSING
         DONE
         CANCELLED
@@ -165,6 +183,7 @@ package "БД пользовательских сценариев — PostgreSQL
         * id: uuid <<PK>>
         * version: integer <<PK>>
         --
+        * is_enabled: boolean
         * user_id: bigint <<FK>>
         * name: varchar(100)
         * is_current: boolean
@@ -197,6 +216,7 @@ package "БД пользовательских сценариев — PostgreSQL
     entity "scenario_execution" as ScenarioExecution {
         * id: bigint <<PK>>
         * scenario_id: uuid <<FK>>
+        * scenario_version: integer
         * created_at: timestamptz
         * status: scenario_execution_status
         finished_at: timestamptz
@@ -229,6 +249,7 @@ package "БД временных рядов - ClickHouse" as db_metrics {
 User ||--o{ UserSession : "открывает >"
 User ||--o{ Sensor : "владеет >"
 User ||--o{ Place : "владеет >"
+User ||--o{ UserCode : "владеет >"
 
 SensorManufacturer ||--o{ SensorModel : "выпускает >"
 SensorModel ||--o{ Sensor : "воплощается в >"
@@ -255,5 +276,6 @@ Command::status ..> CommandStatus
 ScenarioStepTemplate::type ..> ScenarioStepTemplateType
 ScenarioStepExecution::status ..> ScenarioStepExecutionStatus
 ScenarioExecution::status ..> ScenarioExecutionStatus
+UserCode::purpose ..> UserCodePurpose
 
 @enduml

@@ -1,0 +1,826 @@
+openapi: "3.0.3"
+
+info:
+  title: Scenarios API
+  version: "1.0"
+  description: |
+    Публичная часть API сценариев, клиент ходит через шлюз с пользовательским Bearer-токеном.
+    Сценарий - упорядоченная цепочка шагов, каждый шаг создается из шаблона.
+    Версия неизменяема: правка шагов - это создание новой версии целиком,
+    поэтому по одному шаги не добавляются и не удаляются.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/scenario_step_templates:
+    get:
+      tags:
+        - scenarios
+      summary: Каталог шаблонов шагов
+      description: input_schema - JSON Schema параметров шага
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/ScenarioStepTemplateType"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Страница шаблонов
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - pagination
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScenarioStepTemplate"
+                  pagination:
+                    $ref: "#/components/schemas/OffsetPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/scenarios:
+    get:
+      tags:
+        - scenarios
+      summary: Список сценариев пользователя
+      description: Возвращаются текущие версии
+      parameters:
+        - name: is_enabled
+          in: query
+          schema:
+            type: boolean
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Страница сценариев
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - pagination
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Scenario"
+                  pagination:
+                    $ref: "#/components/schemas/OffsetPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags:
+        - scenarios
+      summary: Создать сценарий
+      description: Создается версия 1 и выключенным, шаги можно передать сразу или добавить потом
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioCreateRequest"
+            example:
+              name: "Ночное отопление"
+              steps:
+                - template_id: "0b8f5e2c-1f4a-4c1e-9d6b-2f3a4b5c6d7e"
+                  input:
+                    sensor_id: 1042
+                    metric: "temperature"
+                    operator: "lt"
+                    threshold: 19
+                - template_id: "7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f"
+                  input:
+                    sensor_id: 1043
+                    template_code: "set_target_temperature"
+                    payload:
+                      target_temperature: 22
+      responses:
+        "201":
+          description: Сценарий создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioDetails"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/scenarios/{scenario_id}:
+    parameters:
+      - $ref: "#/components/parameters/ScenarioId"
+    get:
+      tags:
+        - scenarios
+      summary: Получить сценарий вместе с шагами
+      parameters:
+        - name: version
+          in: query
+          description: По умолчанию текущая
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Сценарий и его шаги
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioDetails"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    post:
+      tags:
+        - scenarios
+      summary: Создать новую версию сценария
+      description: |
+        Версии неизменяемы, поэтому любая правка шагов идет через этот метод: шаги передаются
+        целиком, новая версия становится текущей. base_version - это версия, которую
+        редактировал клиент. Если она уже не текущая, значит сценарий поменяли из другой
+        вкладки или с другого устройства, и запрос отклоняется с 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioVersionCreateRequest"
+            example:
+              base_version: 3
+              name: "Ночное отопление"
+              steps:
+                - template_id: "0b8f5e2c-1f4a-4c1e-9d6b-2f3a4b5c6d7e"
+                  input:
+                    sensor_id: 1042
+                    metric: "temperature"
+                    operator: "lt"
+                    threshold: 18
+                - template_id: "7c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f"
+                  input:
+                    sensor_id: 1043
+                    template_code: "set_target_temperature"
+                    payload:
+                      target_temperature: 22
+      responses:
+        "201":
+          description: Создана новая версия, она же текущая
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioDetails"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: base_version уже не текущая, сценарий изменен кем-то еще
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "scenario_version_conflict"
+                message: "Сценарий изменился, обновите страницу"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+    patch:
+      tags:
+        - scenarios
+      summary: Переименовать, включить или выключить сценарий
+      description: Метаданные не относятся к содержимому версии, поэтому новой версии не создают
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioUpdateRequest"
+            example:
+              is_enabled: true
+      responses:
+        "200":
+          description: Сценарий изменен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scenario"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Нельзя включить сценарий без шага-триггера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "scenario_has_no_trigger"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+    delete:
+      tags:
+        - scenarios
+      summary: Удалить сценарий
+      description: Soft-delete всех версий, история запусков сохраняется
+      responses:
+        "204":
+          description: Сценарий удален
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scenarios/{scenario_id}/steps:
+    parameters:
+      - $ref: "#/components/parameters/ScenarioId"
+    get:
+      tags:
+        - scenarios
+      summary: Шаги сценария
+      description: В порядке выполнения
+      parameters:
+        - name: version
+          in: query
+          description: По умолчанию текущая
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Шаги сценария
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScenarioStep"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scenarios/{scenario_id}/steps/{step_id}:
+    parameters:
+      - $ref: "#/components/parameters/ScenarioId"
+      - $ref: "#/components/parameters/StepId"
+    get:
+      tags:
+        - scenarios
+      summary: Получить шаг
+      responses:
+        "200":
+          description: Шаг
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioStep"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scenario_executions:
+    get:
+      tags:
+        - executions
+      summary: История запусков сценариев
+      parameters:
+        - name: scenario_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/ScenarioExecutionStatus"
+          style: form
+          explode: true
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница запусков, от новых к старым
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - pagination
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScenarioExecution"
+                  pagination:
+                    $ref: "#/components/schemas/CursorPagination"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/scenario_executions/{execution_id}:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    get:
+      tags:
+        - executions
+      summary: Информация о запуске
+      responses:
+        "200":
+          description: Запуск
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioExecution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scenario_executions/{execution_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    post:
+      tags:
+        - executions
+      summary: Отменить выполняющийся запуск
+      description: |
+        Невыполненные шаги не будут выполнены, запись остается в истории.
+        Уже отправленные команды не отзываются, их надо отменять через API команд.
+      responses:
+        "200":
+          description: Запуск отменен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioExecution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Запуск уже завершен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                code: "execution_already_finished"
+
+  /api/v1/scenario_executions/{execution_id}/steps:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+    get:
+      tags:
+        - executions
+      summary: Шаги запуска
+      description: Видно, на каком шаге сценарий встал и с какой ошибкой
+      responses:
+        "200":
+          description: Шаги запуска в порядке выполнения
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScenarioStepExecution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scenario_executions/{execution_id}/steps/{step_execution_id}:
+    parameters:
+      - $ref: "#/components/parameters/ExecutionId"
+      - $ref: "#/components/parameters/StepExecutionId"
+    get:
+      tags:
+        - executions
+      summary: Информация о выполнении одного шага
+      responses:
+        "200":
+          description: Выполнение шага
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioStepExecution"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    Cursor:
+      name: cursor
+      in: query
+      description: Значение pagination.next_cursor из предыдущего ответа
+      schema:
+        type: string
+
+    ScenarioId:
+      name: scenario_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    StepId:
+      name: step_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+    ExecutionId:
+      name: execution_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+    StepExecutionId:
+      name: step_execution_id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: Невалидный запрос
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "bad_request"
+
+    Unauthorized:
+      description: Токен отсутствует или невалиден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "unauthorized"
+
+    NotFound:
+      description: Объект не найден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "not_found"
+
+    ValidationError:
+      description: Ошибка валидации
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: "validation_error"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorDetail:
+      type: object
+      required:
+        - message
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    OffsetPagination:
+      type: object
+      required:
+        - limit
+        - offset
+        - total
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    CursorPagination:
+      type: object
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+
+    ScenarioStepTemplateType:
+      type: string
+      enum:
+        - TRIGGER
+        - EXECUTION
+        - CONDITIONAL
+        - LOOP
+
+    ScenarioStepTemplate:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - input_schema
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "Показание датчика ниже порога"
+        type:
+          $ref: "#/components/schemas/ScenarioStepTemplateType"
+        input_schema:
+          type: object
+          additionalProperties: true
+
+    Scenario:
+      type: object
+      required:
+        - id
+        - version
+        - name
+        - is_enabled
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        name:
+          type: string
+          example: "Ночное отопление"
+        is_enabled:
+          type: boolean
+        steps_count:
+          type: integer
+        last_executed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ScenarioDetails:
+      allOf:
+        - $ref: "#/components/schemas/Scenario"
+        - type: object
+          required:
+            - steps
+          properties:
+            steps:
+              type: array
+              items:
+                $ref: "#/components/schemas/ScenarioStep"
+
+    ScenarioStep:
+      type: object
+      required:
+        - id
+        - template
+        - input
+      properties:
+        id:
+          type: integer
+          format: int64
+        template:
+          $ref: "#/components/schemas/ScenarioStepTemplate"
+        previous_step_id:
+          type: integer
+          format: int64
+          nullable: true
+        input:
+          type: object
+          additionalProperties: true
+
+    ScenarioStepWriteRequest:
+      type: object
+      required:
+        - template_id
+      properties:
+        template_id:
+          type: string
+          format: uuid
+        input:
+          type: object
+          additionalProperties: true
+
+    ScenarioCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioStepWriteRequest"
+
+    ScenarioVersionCreateRequest:
+      type: object
+      required:
+        - base_version
+        - steps
+      properties:
+        base_version:
+          type: integer
+          minimum: 1
+          description: Версия, на основе которой правил клиент
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        steps:
+          type: array
+          minItems: 1
+          description: Полный набор шагов новой версии в порядке выполнения
+          items:
+            $ref: "#/components/schemas/ScenarioStepWriteRequest"
+
+    ScenarioUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        is_enabled:
+          type: boolean
+
+    ScenarioExecutionStatus:
+      type: string
+      enum:
+        - PROCESSING
+        - DONE
+        - CANCELLED
+        - FAILED
+
+    ScenarioStepExecutionStatus:
+      type: string
+      enum:
+        - NOT_STARTED
+        - PROCESSING
+        - DONE
+        - CANCELLED
+        - FAILED
+
+    ScenarioExecution:
+      type: object
+      required:
+        - id
+        - scenario_id
+        - scenario_version
+        - status
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        scenario_id:
+          type: string
+          format: uuid
+        scenario_version:
+          type: integer
+          description: Версия сценария, которая выполнялась
+        scenario_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ScenarioExecutionStatus"
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ScenarioStepExecution:
+      type: object
+      required:
+        - id
+        - step_id
+        - status
+        - created_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        step_id:
+          type: integer
+          format: int64
+        template_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ScenarioStepExecutionStatus"
+        error:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true

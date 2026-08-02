@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package remote_control_command.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "path/to/package";
+
+
+service RemoteControlCommandService {
+    rpc Send(SendCommandRequest) returns (CommandResult);
+    rpc Cancel(CommandId) returns (CommandResult);
+    rpc GetResult(CommandId) returns (CommandResult);
+    rpc GetResultsBySensorId(SensorId) returns (CommandResults);
+}
+
+message SendCommandRequest {
+    string code = 1;
+    string idempotency_key = 2;
+    uint64 sensor_id  = 3;
+    google.protobuf.Struct input_payload = 4;
+}
+
+
+message CommandId {
+    // uuid
+    string id = 1;
+}
+
+message SensorId {
+    uint64 id = 1;
+}
+
+enum CommandStatus {
+    COMMAND_STATUS_UNSPECIFIED = 0;
+    COMMAND_STATUS_PENDING = 1;
+    COMMAND_STATUS_PROCESSING = 2;
+    COMMAND_STATUS_DONE = 3;
+    COMMAND_STATUS_CANCELLED = 4;
+    COMMAND_STATUS_FAILED = 5;
+}
+
+message CommandResult {
+    string id = 1;
+    CommandStatus status = 2;
+    google.protobuf.Timestamp created_at = 3;
+    google.protobuf.Timestamp finished_at = 4;
+    google.protobuf.Struct input_payload = 5;
+    google.protobuf.Struct result_data = 6;
+}
+
+message CommandResults {
+    repeated CommandResult results = 1;
+}
