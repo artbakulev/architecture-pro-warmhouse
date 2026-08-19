@@ -10,6 +10,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    volumes:
+      - ./smart_home/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - smarthome-network
 

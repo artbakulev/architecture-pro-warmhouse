@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,16 +25,43 @@ type TemperatureResponse struct {
 
 func (t TemperatureHandler) GetTemperature(w http.ResponseWriter, r *http.Request) {
 	location := r.URL.Query().Get("location")
+	sensorID := chi.URLParam(r, "sensorId")
 	log.Printf("Handling location=%s", location)
 	value := randomFloat(0, 40)
 
+	if location == "" {
+		switch sensorID {
+		case "1":
+			location = "Living Room"
+		case "2":
+			location = "Bedroom"
+		case "3":
+			location = "Kitchen"
+		default:
+			location = "Unknown"
+		}
+	}
+
+	if sensorID == "" {
+		switch location {
+		case "Living Room":
+			sensorID = "1"
+		case "Bedroom":
+			sensorID = "2"
+		case "Kitchen":
+			sensorID = "3"
+		default:
+			sensorID = "0"
+		}
+	}
+
 	resp := TemperatureResponse{
 		Value: value,
-		Unit: "C",
+		Unit: "°C",
 		Timestamp: time.Now(),
-		Location: "Test location",
+		Location: location,
 		Status: "healthy",
-		SensorID: strconv.Itoa(randomInt(10000, 99999)),
+		SensorID: sensorID,
 		SensorType: "temperature",
 		Description: "Test description",
 	}
@@ -51,5 +77,6 @@ func main() {
 	r.Use(middleware.Logger)
 	temperatureHandler := TemperatureHandler{}
 	r.Get("/temperature", temperatureHandler.GetTemperature)
+	r.Get("/temperature/{sensorId}", temperatureHandler.GetTemperature)
 	http.ListenAndServe(":8081", r)
 }
