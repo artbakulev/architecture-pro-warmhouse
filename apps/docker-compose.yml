@@ -30,12 +30,14 @@ services:
       start_period: 10s
     ports:
       - 8123:8123
+      - 9000:9000
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
     volumes:
       - clickhouse_data:/var/lib/clickhouse
+      - ./metric_worker/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - smarthome-network
 
@@ -51,14 +53,34 @@ services:
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_NUM_PARTITIONS=1
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
       interval: 10s
       timeout: 10s
       retries: 5
       start_period: 30s
+    ports:
+      - 9092:9092
     volumes:
       - kafka_data:/var/lib/kafka/data 
+    networks:
+      - smarthome-network
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: smarthome-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -c
+      - >
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic measurement.result --partitions 10 --replication-factor 1
+        --config cleanup.policy=delete --config retention.ms=604800000
+        && echo 'Topics created.'
     networks:
       - smarthome-network
 
@@ -85,6 +107,20 @@ services:
     restart: unless-stopped
     networks:
       - smarthome-network
+
+  metric-worker:
+    build:
+      context: ./metric_worker
+      dockerfile: Dockerfile
+    environment:
+      - METRIC_WORKER_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    container_name: metric-worker
+    restart: unless-stopped
+    networks:
+      - smarthome-network 
+    depends_on:
+      - clickhouse
+      - kafka
 
   app:
     build:
