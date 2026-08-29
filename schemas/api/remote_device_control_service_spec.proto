@@ -5,7 +5,7 @@ package remote_control_command.v1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "path/to/package";
+option go_package = "smarthome/proto/remotecontrol;remotecontrol";
 
 
 service RemoteControlCommandService {

@@ -84,19 +84,6 @@ services:
     networks:
       - smarthome-network
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    ports:
-      - "9094:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - smarthome-network
-
   temperature-api:
     build:
       context: ./temperature_api
@@ -122,6 +109,15 @@ services:
       - clickhouse
       - kafka
 
+  command-service:
+    build:
+      context: ..
+      dockerfile: apps/command_service/Dockerfile
+    container_name: command-service
+    restart: unless-stopped
+    networks:
+      - smarthome-network
+
   app:
     build:
       context: ./smart_home
@@ -132,11 +128,19 @@ services:
         condition: service_healthy
       temperature-api:
         condition: service_started
+      command-service:
+        condition: service_started
       clickhouse:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/smarthome
       - TEMPERATURE_API_URL=http://temperature-api:8081
+      - COMMAND_SERVICE_ADDR=command-service:50051
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DATABASE=default
+      - CLICKHOUSE_USERNAME=smarthome
+      - CLICKHOUSE_PASSWORD=clickhouse
     ports:
       - "8080:8080"
     restart: unless-stopped

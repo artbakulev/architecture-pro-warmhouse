@@ -198,4 +198,53 @@ Locations - название комнаты, sensorId - идентификато
 1. Создайте новые микросервисы для управления телеметрией и устройствами (с простейшей логикой), которые будут интегрированы с существующим монолитным приложением. Каждый микросервис на своем ООП языке.
 2. Обеспечьте взаимодействие между микросервисами и монолитом (при желании с помощью брокера сообщений), чтобы постепенно перенести функциональность из монолита в микросервисы. 
 
-В результате у вас должны быть созданы Dockerfiles и docker-compose для запуска микросервисов. 
+В результате у вас должны быть созданы Dockerfiles и docker-compose для запуска микросервисов.
+
+# Как запустить и проверить
+
+```bash
+cd apps
+docker compose up -d --build
+```
+
+## Задание 5: датчики и температура
+
+Импортировать `apps/smarthome-api.postman_collection.json` в Postman, вызвать Create Sensor, затем Get All Sensors несколько раз — значение температуры меняется при каждом вызове.
+
+## Задание 6: телеметрия (Kafka → metric_worker → ClickHouse)
+
+Отправить показания в топик (ключ сообщения — sensor_id):
+
+```bash
+docker exec -i smarthome-kafka bash -c '/opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic measurement.result --property parse.key=true --property key.separator=:' <<'EOF'
+1:{"sensor_id": 1, "metric": "temperature", "measured_at": "2026-08-29T12:00:00.000", "value": 21.4}
+1:{"sensor_id": 1, "metric": "temperature", "measured_at": "2026-08-29T12:01:00.000", "value": 21.9}
+2:{"sensor_id": 2, "metric": "temperature", "measured_at": "2026-08-29T12:00:00.000", "value": 19.2}
+EOF
+```
+
+Убедиться, что metric_worker записал их в ClickHouse:
+
+```bash
+docker exec smarthome-clickhouse clickhouse-client -u smarthome --password clickhouse -q "SELECT sensor_id, metric, value, measured_at FROM measurement ORDER BY sensor_id, measured_at"
+```
+
+Метрики доступны и через монолит:
+
+```bash
+curl localhost:8080/api/v1/sensors/metrics/1
+```
+
+## Задание 6: команды устройствам (монолит → gRPC → command_service)
+
+```bash
+curl -X POST localhost:8080/api/v1/sensors/1/commands -H 'Content-Type: application/json' -d '{"code":"set_temperature","payload":{"value":22}}'
+```
+
+Ответ содержит id команды и статус `pending`. Через пару секунд команда выполняется:
+
+```bash
+curl localhost:8080/api/v1/commands/<id>
+```
+
+Статус меняется на `done`, появляется `finished_at`. Повторная отправка команды с тем же `idempotency_key` (генерируется монолитом на каждый запрос) вернула бы ту же команду — дублей не создаётся.

@@ -12,6 +12,7 @@ import (
 	"smarthome/db"
 	"smarthome/handlers"
 	"smarthome/services"
+	"smarthome/timeseries"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,10 +28,37 @@ func main() {
 
 	log.Println("Connected to database successfully")
 
+	clickhouseClient, err := timeseries.New(
+		getEnv("CLICKHOUSE_HOST", "clickhouse"),
+		getEnv("CLICKHOUSE_PORT", "9000"),
+		getEnv("CLICKHOUSE_DATABASE", "default"),
+		getEnv("CLICKHOUSE_USERNAME", "smarthome"),
+		getEnv("CLICKHOUSE_PASSWORD", "clickhouse"),
+	)
+	if err != nil {
+		log.Fatalf("Unable to create timeseries client: %v\n", err)
+	}
+
+	err = clickhouseClient.Connect()
+	if err != nil {
+		log.Fatalf("Unable to connect to timeseries client: %v\n", err)
+	}
+
+	defer clickhouseClient.Close()
+
 	// Initialize temperature service
 	temperatureAPIURL := getEnv("TEMPERATURE_API_URL", "http://temperature-api:8081")
 	temperatureService := services.NewTemperatureService(temperatureAPIURL)
 	log.Printf("Temperature service initialized with API URL: %s\n", temperatureAPIURL)
+
+	commandServiceAddr := getEnv("COMMAND_SERVICE_ADDR", "command-service:50051")
+	commandService, err := services.NewCommandService(commandServiceAddr)
+	if err != nil {
+		log.Fatalf("Unable to create command service client: %v\n", err)
+	}
+	log.Printf("Command service client initialized with address: %s\n", commandServiceAddr)
+
+	metricsService := services.NewMetricsService(clickhouseClient)
 
 	// Initialize router
 	router := gin.Default()
@@ -46,8 +74,11 @@ func main() {
 	apiRoutes := router.Group("/api/v1")
 
 	// Register sensor routes
-	sensorHandler := handlers.NewSensorHandler(database, temperatureService)
+	sensorHandler := handlers.NewSensorHandler(database, temperatureService, metricsService)
 	sensorHandler.RegisterRoutes(apiRoutes)
+
+	commandHandler := handlers.NewCommandHandler(commandService)
+	commandHandler.RegisterRoutes(apiRoutes)
 
 	// Start server
 	srv := &http.Server{

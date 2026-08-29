@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="../../schemas/api/remote_device_control_service_spec.proto" ProtoRoot="../../schemas/api" GrpcServices="Server" />
+  </ItemGroup>
+
+</Project>
