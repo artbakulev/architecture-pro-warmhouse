@@ -33,8 +33,8 @@ class ClickhouseConfig:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class FlusherConfig:
-    seconds_to_flush: int = 100
-    items_to_flush: int = 3
+    seconds_to_flush: int = 5
+    items_to_flush: int = 100
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
