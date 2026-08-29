@@ -1,0 +1,102 @@
+@startuml Теплый Дом - API управления устройствами и регистрации пользователей - C4 Component
+!include <C4/C4_Component>
+
+title "Теплый Дом - API управления устройствами и регистрации пользователей - C4 Component"
+
+Container(smarthome_ui, "Веб-сервис управления устройствами", "React", "UI для регистрации/авторизации и управления своими устройствами", $sprite="&browser")
+
+ContainerDb(relation_db, "БД пользователей и датчиков", "PostgreSQL", "Хранит данные о датчиках и пользователях")
+ContainerDb(timeseries_db, "БД временных рядов", "Clickhouse", "Хранит переданные показания датчиков")
+
+Container(mqtt_broker, "MQTT-брокер", "EMQX", "Управляет MQTT-сессиями датчиков и их аутентификацией")
+Container(remote_device_control_service, "Сервис удаленного управления устройствами", "Go", "Отправляет команды датчику")
+
+System_Ext(email_provider, "Сервис отправки email", "Отсылает email-уведомление")
+
+Container_Boundary(smarthome_api, "API управления устройствами и регистрации пользователей") {
+
+    ' --- Публичные методы ---
+    Component(registration_controller, "Компонент регистрации", "Litestar Controller", "Позволяет пользователю зарегистрироваться")
+    Component(signin_controller, "Компонент авторизации", "Litestar Controller", "Позволяет пользователю войти")
+    Component(reset_password_controller, "Компонент сброса пароля", "Litestar Controller", "Позволяет пользователю сбросить пароль")
+
+    Component(jwt_generator, "Компонент генерации JWT", "Python function", "Генерирует JWT для пользователя")
+
+    ' --- Методы под авторизацией ---
+    Boundary(protected_api, "Доступные только под авторизацией методы") {
+        Component(device_registration_controller, "Компонент регистрации датчика", "Litestar Controller", "Позволяет добавить в систему датчик")
+        Component(device_get_controller, "Компонент получения датчика", "Litestar Controller", "Позволяет получить информацию о датчике/проверить наличие")
+        Component(device_remove_controller, "Компонент удаления датчика", "Litestar Controller", "Позволяет удалить датчик из системы")
+        Component(device_remote_control_command_controller, "Компонент отправки удаленных команд", "Litestar Controller", "Позволяет отправить команду датчику")
+        Component(device_remote_control_status_controller, "Компонент проверки статуса удаленной команды", "Litestar Controller", "Позволяет получить статус выполнения команды")
+        Component(device_measurements_view_controller, "Компонент отображения метрик", "Litestar Controller", "Позволяет получить данные о метриках с фильтрами по времени/значениям")
+    }
+
+    Component(auth_middleware, "Middleware авторизации", "Litestar Middleware", "Проверяет наличие и валидность JWT")
+    Component(config, "Конфигурация приложения", "pyaml + msgspec", "Хранит секреты, строки подключения к БД и другие настройки")
+
+    ' --- Слой доступа к соседям ---
+    Component(email_accessor, "Компонент отправки email", "Python Accessor", "Отправляет письмо по адресу")
+    Component(relation_db_accessor, "Компонент доступа к реляционной БД", "SQLAlchemy[Asyncpg]", "Работает с БД")
+    Component(timeseries_db_accessor, "Компонент доступа к колоночной БД", "Clickhouse Connect", "Работает с БД")
+    Component(mqtt_admin_client, "Клиент управления MQTT-брокером", "httpx", "Разрывает сессию отозванного датчика")
+
+
+    ' --- Авторизация ---
+    Rel(smarthome_ui, registration_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, signin_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, reset_password_controller, "Обрабатывает запросы", "REST API")
+
+    Rel(auth_middleware, protected_api, "Пропускает запросы только с валидным JWT")
+    Rel(auth_middleware, config, "Получает секрет для проверки подписи JWT")
+
+    Rel(registration_controller, jwt_generator, "Запрашивает JWT по user_id")
+    Rel(signin_controller, jwt_generator, "Запрашивает JWT по user_id")
+    Rel(jwt_generator, config, "Получает секрет для подписи JWT")
+
+    Rel(registration_controller, relation_db_accessor, "Создает пользователя, проверяет на уникальность")
+    Rel(signin_controller, relation_db_accessor, "Проверяет учётные данные пользователя")
+    Rel(reset_password_controller, relation_db_accessor, "Находит пользователя по email, сохраняет новый пароль")
+
+    Rel(registration_controller, email_accessor, "Просит отправить письмо подтверждения регистрации")
+    Rel(reset_password_controller, email_accessor, "Просит отправить письмо со ссылкой на сброс")
+    Rel(email_accessor, email_provider, "Отправляет письмо", "SMTP / REST API")
+    Rel(email_accessor, config, "Получает адрес и учётные данные почтового провайдера")
+
+    ' --- Управление датчиками ---
+    Rel(smarthome_ui, device_registration_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, device_get_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, device_remove_controller, "Обрабатывает запросы", "REST API")
+
+    Rel(device_registration_controller, relation_db_accessor, "Создает датчик и записывает его авторизационные данные")
+    Rel(device_get_controller, relation_db_accessor, "Получает датчик")
+    Rel(device_remove_controller, relation_db_accessor, "Удаляет датчик (soft-delete)")
+    Rel(device_remove_controller, mqtt_admin_client, "Просит разорвать сессию удаленного датчика")
+
+    Rel(mqtt_admin_client, mqtt_broker, "Разрывает сессию датчика", "HTTP Management API")
+    Rel(mqtt_admin_client, config, "Получает адрес и учётные данные брокера")
+
+    ' --- Удаленное управление и показания ---
+    Rel(smarthome_ui, device_remote_control_command_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, device_remote_control_status_controller, "Обрабатывает запросы", "REST API")
+    Rel(smarthome_ui, device_measurements_view_controller, "Обрабатывает запросы", "REST API")
+
+    Rel(device_remote_control_command_controller, relation_db_accessor, "Проверяет, что датчик принадлежит пользователю")
+    Rel(device_measurements_view_controller, relation_db_accessor, "Проверяет, что датчик принадлежит пользователю")
+
+    Rel(device_remote_control_command_controller, remote_device_control_service, "Отправляет команду", "REST API")
+    Rel(device_remote_control_status_controller, remote_device_control_service, "Узнает статус исполнения команды", "REST API")
+    Rel(device_remote_control_command_controller, config, "Получает адрес сервиса удалённого управления")
+    Rel(device_remote_control_status_controller, config, "Получает адрес сервиса удалённого управления")
+
+    Rel(device_measurements_view_controller, timeseries_db_accessor, "Получает показания датчика")
+
+    ' --- Доступ к хранилищам ---
+    Rel(relation_db_accessor, relation_db, "Отправляет запросы", "TCP")
+    Rel(timeseries_db_accessor, timeseries_db, "Отправляет запросы", "TCP")
+
+    Rel(relation_db_accessor, config, "Получает конфигурацию")
+    Rel(timeseries_db_accessor, config, "Получает конфигурацию")
+}
+
+@enduml

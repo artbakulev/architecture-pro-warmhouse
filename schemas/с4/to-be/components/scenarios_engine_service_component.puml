@@ -1,0 +1,59 @@
+@startuml Теплый Дом - Сервис выполнения пользовательских сценариев - C4 Component
+!include <C4/C4_Component>
+
+title "Теплый Дом - Сервис выполнения пользовательских сценариев - C4 Component"
+
+AddRelTag("async", $lineStyle=DashedLine(), $legendText="асинхронное взаимодействие")
+
+
+Container(smarthome_api, "API управления устройствами и регистрации пользователей", "Python", "Единый шлюз работы с сервисом")
+ContainerQueue(measurements_queue, "Очередь показаний датчиков", "Kafka")
+ContainerDb(scenarios_engine_service_db, "БД пользовательских сценариев", "PostgreSQL", "Хранит пользовательские сценарии и историю их выполнения")
+Container(remote_device_control_service, "Сервис удаленного управления устройствами", "Go", "Отправляет команды датчику")
+
+Container_Boundary(scenarios_engine_service, "Сервис выполнения пользовательских сценариев") {
+
+    Boundary(protected_api, "Доступные только под межсервисной авторизацией методы") {
+        Component(scenario_crud_controller, "Компонент управления сценариями", "Litestar Controller", "Создает, изменяет, включает и удаляет сценарии пользователя")
+    }
+
+    Component(auth_middleware, "Мидлвара авторизации", "Litestar Middleware", "Проверяет basic-auth заголовок")
+    Component(config, "Конфигурация приложения", "pyaml + msgspec", "Хранит секреты, строки подключения к БД и другие настройки")
+
+    Component(measurements_consumer, "Компонент чтения показаний", "aiokafka", "Читает показания из топика своей группой потребителей")
+    Component(rules_matcher, "Компонент подбора и вычисления правил", "Python function", "Находит сценарии по датчику и вычисляет их условия")
+    Component(trigger_state, "Компонент состояния срабатываний", "Python function", "Срабатывает на переходе условия, а не на каждом показании")
+    Component(time_trigger, "Компонент срабатывания правил по времени", "Python function", "Срабатывает по времени сценария")
+    
+
+    Component(command_client, "Клиент сервиса удаленного управления", "httpx", "Отправляет команду по сработавшему сценарию")
+    Component(db_accessor, "Компонент доступа к реляционной БД", "SQLAlchemy[Asyncpg]", "Работает с БД")
+
+    ' --- Управление сценариями ---
+    Rel(auth_middleware, protected_api, "Пропускает запросы только с валидными межсервисными учетными данными")
+    Rel(auth_middleware, config, "Получает учетные данные для проверки заголовка")
+    Rel(scenario_crud_controller, db_accessor, "Создает, изменяет и удаляет сценарии пользователя")
+
+    ' --- Реакция на показания ---
+    Rel(measurements_consumer, rules_matcher, "Передает показание датчика")
+    Rel(time_trigger, db_accessor, "Читает время запуска сценариев")
+    Rel(time_trigger, rules_matcher, "Запускает сценарий")
+    Rel(rules_matcher, db_accessor, "Получает включенные сценарии по идентификатору датчика")
+    Rel(rules_matcher, trigger_state, "Спрашивает, нужно ли срабатывать на этом показании")
+    Rel(trigger_state, db_accessor, "Читает и обновляет последнее состояние сценария")
+    Rel(rules_matcher, command_client, "Просит отправить команду по сработавшему сценарию")
+    Rel(rules_matcher, db_accessor, "Записывает срабатывание в историю")
+
+    Rel(measurements_consumer, config, "Читает параметры подключения и имя группы потребителей")
+    Rel(trigger_state, config, "Читает параметры условий срабатываний, типа интервала")
+    Rel(command_client, config, "Получает адрес и учетные данные сервиса удаленного управления")
+    Rel(db_accessor, config, "Получает адрес и учетные данные БД")
+}
+
+Rel(smarthome_api, scenario_crud_controller, "Управляет сценариями", "REST API")
+Rel(measurements_queue, measurements_consumer, "Доставляет показания", "Kafka protocol", $tags="async")
+Rel(command_client, remote_device_control_service, "Отправляет команду", "REST API")
+Rel(db_accessor, scenarios_engine_service_db, "Отправляет запросы", "TCP")
+
+SHOW_LEGEND()
+@enduml

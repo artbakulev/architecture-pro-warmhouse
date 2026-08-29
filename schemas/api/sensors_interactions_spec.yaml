@@ -1,0 +1,66 @@
+asyncapi: 3.0.0
+info:
+  title: Сбор метрик
+  version: 1.0.0
+
+channels:
+  mqttSensorsMeasurements:
+    address: 'sensors/{sensorId}/measurements'
+    parameters:
+      sensorId:
+        description: 'Идентификатор датчика (uint64)'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: false
+    messages:
+      sensorMeasurement:
+        payload:
+          $ref: '#/components/schemas/mqttSensorMeasurement'
+  
+  mqttSensorsEvents:
+    address: 'sensors/{sensorId}/events'
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+
+  kafkaSensorsMeasurements:
+    address: 'sensors.measurements'
+    bindings:
+      kafka:
+        topic: 'sensors.measurements'
+
+
+operations:
+  sendmqttSensorsMeasurement:
+    action: receive
+    channel:
+      $ref: '#/channels/mqttSensorsMeasurements'
+
+components:
+  schemas:
+    mqttSensorMeasurement:
+      type: object
+      required:
+        - type
+        - measured_at
+        - value
+      properties:
+        type:
+          type: string
+          description: Тип измерения
+        measured_at:
+          type: string
+          format: date-time
+          description: Время измерения
+        value:
+          type: number
+          format: double
+          description: Значение измерения
+        meta:
+          type: object
+          description: Дополнительные параметры
+
+
+

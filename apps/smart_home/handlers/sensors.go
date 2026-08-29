@@ -18,13 +18,15 @@ import (
 type SensorHandler struct {
 	DB                 *db.DB
 	TemperatureService *services.TemperatureService
+	MetricsService *services.MetricsService
 }
 
 // NewSensorHandler creates a new SensorHandler
-func NewSensorHandler(db *db.DB, temperatureService *services.TemperatureService) *SensorHandler {
+func NewSensorHandler(db *db.DB, temperatureService *services.TemperatureService, metricsService *services.MetricsService) *SensorHandler {
 	return &SensorHandler{
 		DB:                 db,
 		TemperatureService: temperatureService,
+		MetricsService: metricsService,
 	}
 }
 
@@ -39,6 +41,7 @@ func (h *SensorHandler) RegisterRoutes(router *gin.RouterGroup) {
 		sensors.DELETE("/:id", h.DeleteSensor)
 		sensors.PATCH("/:id/value", h.UpdateSensorValue)
 		sensors.GET("/temperature/:location", h.GetTemperatureByLocation)
+		sensors.GET("/metrics/:id", h.ListMetricsBySensorId)
 	}
 }
 
@@ -126,6 +129,23 @@ func (h *SensorHandler) GetTemperatureByLocation(c *gin.Context) {
 		"timestamp":   tempData.Timestamp,
 		"description": tempData.Description,
 	})
+}
+
+func (h *SensorHandler) ListMetricsBySensorId(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sensor ID"})
+		return
+	}
+
+
+	metrics, err := h.MetricsService.GetMetricsById(uint64(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("%s", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, metrics)
 }
 
 // CreateSensor handles POST /api/v1/sensors

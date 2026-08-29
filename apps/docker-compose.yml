@@ -1,13 +1,122 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: smarthome-postgres
-  ## тут нужно добавить настройки
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./smart_home/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - smarthome-network
+
+  clickhouse:
+    image: clickhouse:26.7
+    container_name: smarthome-clickhouse
+    environment:
+      - CLICKHOUSE_USER=smarthome
+      - CLICKHOUSE_PASSWORD=clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - 8123:8123
+      - 9000:9000
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./metric_worker/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - smarthome-network
+
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: smarthome-kafka
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_NUM_PARTITIONS=1
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    ports:
+      - 9092:9092
+    volumes:
+      - kafka_data:/var/lib/kafka/data 
+    networks:
+      - smarthome-network
+
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: smarthome-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -c
+      - >
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists
+        --topic measurement.result --partitions 10 --replication-factor 1
+        --config cleanup.policy=delete --config retention.ms=604800000
+        && echo 'Topics created.'
+    networks:
+      - smarthome-network
 
   temperature-api:
-  ## тут нужно добавить приложение
+    build:
+      context: ./temperature_api
+      dockerfile: Dockerfile
+    container_name: temperature-api
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    networks:
+      - smarthome-network
+
+  metric-worker:
+    build:
+      context: ./metric_worker
+      dockerfile: Dockerfile
+    environment:
+      - METRIC_WORKER_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    container_name: metric-worker
+    restart: unless-stopped
+    networks:
+      - smarthome-network 
+    depends_on:
+      - clickhouse
+      - kafka
+
+  command-service:
+    build:
+      context: ..
+      dockerfile: apps/command_service/Dockerfile
+    container_name: command-service
+    restart: unless-stopped
+    networks:
+      - smarthome-network
 
   app:
     build:
@@ -19,9 +128,19 @@ services:
         condition: service_healthy
       temperature-api:
         condition: service_started
+      command-service:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/smarthome
       - TEMPERATURE_API_URL=http://temperature-api:8081
+      - COMMAND_SERVICE_ADDR=command-service:50051
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=9000
+      - CLICKHOUSE_DATABASE=default
+      - CLICKHOUSE_USERNAME=smarthome
+      - CLICKHOUSE_PASSWORD=clickhouse
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -30,6 +149,8 @@ services:
 
 volumes:
   postgres_data:
+  clickhouse_data:
+  kafka_data:
 
 networks:
   smarthome-network:
